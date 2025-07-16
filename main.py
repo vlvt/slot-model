@@ -6,7 +6,8 @@ import random
 REELS_CSV = "reels.csv"
 PAYTABLE_CSV = "paytable.csv"
 N_SIMULATIONS = 100000
-SEED = 42
+  # Number of spins to simulate
+SEED = 4555665
 
 random.seed(SEED)
 
@@ -40,30 +41,38 @@ def get_symbols(reel, pos):
     ]
 
 def calculate_line_win(middle_row):
-    """Compute line prize on the middle row, with wild substitution."""
-    seq_sym = None
-    count = 0
-    for sym in middle_row:
-        if sym == "BONUS":
-            break
-        if sym == "WILD":
-            if seq_sym:
-                count += 1
-            continue
-        if seq_sym is None:
-            seq_sym = sym
-            count = 1
-        elif sym == seq_sym:
-            count += 1
-        else:
-            break
-    if not seq_sym or count < 1:
-        return 0
-    col = f"COUNT {count}"
-    try:
-        return int(paytable.loc[paytable["SYMBOL"] == seq_sym, col].values[0])
-    except:
-        return 0
+    """Compute total line prize from all possible aligned sequences (2 to 5 in a row)."""
+    total_win = 0
+    for start in range(0, 5):  # возможные старты: 0,1,2,3,4
+        for length in range(2, 6):  # длины: 2–5
+            if start + length > 5:
+                continue
+            seq = middle_row[start:start + length]
+            seq_sym = None
+            count = 0
+            for sym in seq:
+                if sym == "BONUS":
+                    break
+                if sym == "WILD":
+                    if seq_sym:
+                        count += 1
+                    continue
+                if seq_sym is None:
+                    seq_sym = sym
+                    count = 1
+                elif sym == seq_sym:
+                    count += 1
+                else:
+                    break
+            if not seq_sym or count != length:
+                continue
+            col = f"COUNT {count}"
+            try:
+                win = int(paytable.loc[paytable["SYMBOL"] == seq_sym, col].values[0])
+                total_win += win
+            except:
+                continue
+    return total_win
 
 def is_bonus_trigger(all_symbols):
     """Return True if exactly 5 BONUS symbols appear anywhere in view."""
@@ -105,6 +114,53 @@ E_bonus_sim = total_free_spin_coins / N_SIMULATIONS
 Gross_RTP = E_line + E_bonus_sim
 Net_RTP = Gross_RTP - 1
 
+# === Подсчёт вклада каждого символа ===
+symbol_ev_sum = {}
+
+for _ in range(N_SIMULATIONS):
+    mid_row = []
+    for i in range(1, 6):
+        reel = reel_lists[f"REEL{i}"]
+        pos = random.randint(0, len(reel) - 1)
+        mid_row.append(get_symbols(reel, pos)[1])
+        
+    for start in range(0, 5):
+        for length in range(2, 6):
+            if start + length > 5:
+                continue
+            seq = mid_row[start:start + length]
+            seq_sym = None
+            count = 0
+            for sym in seq:
+                if sym == "BONUS":
+                    break
+                if sym == "WILD":
+                    if seq_sym:
+                        count += 1
+                    continue
+                if seq_sym is None:
+                    seq_sym = sym
+                    count = 1
+                elif sym == seq_sym:
+                    count += 1
+                else:
+                    break
+            if not seq_sym or count != length:
+                continue
+            col = f"COUNT {count}"
+            try:
+                win = int(paytable.loc[paytable["SYMBOL"] == seq_sym, col].values[0])
+                symbol_ev_sum[seq_sym] = symbol_ev_sum.get(seq_sym, 0) + win
+            except:
+                continue
+
+symbol_ev_final = {sym: ev / N_SIMULATIONS for sym, ev in symbol_ev_sum.items()}
+total_symbol_ev = sum(symbol_ev_final.values())
+
+print("\n=== EV by SYMBOL ===")
+for sym, ev in sorted(symbol_ev_final.items(), key=lambda x: -x[1]):
+    perc = 100 * ev / (E_line + E_bonus_sim)
+    print(f"{sym}: {ev:.6f} coins/spin ({perc:.2f}%)")
 
 print("=== LUCKY7 SIMULATION WITH FREE SPINS ===")
 print(f"Spins simulated:            {N_SIMULATIONS}")
